@@ -579,8 +579,16 @@ public class AffineFusion implements Callable<Void>, Serializable
 		//BdvFunctions.show( spimData );
 		//SimpleMultiThreading.threadHaltUnClean();
 
-		System.out.println(Arrays.toString(args));
-		System.exit(new CommandLine(new AffineFusion()).execute(args));
+//		System.out.println(Arrays.toString(args));
+//		System.exit(new CommandLine(new AffineFusion()).execute(args));
+		System.out.println("Your OS name -> " + System.getProperty("os.name"));
+
+		//Operating system version
+		System.out.println("Your OS version -> " + System.getProperty("os.version"));
+
+		//Operating system architecture
+		System.out.println("Your OS Architecture -> " + System.getProperty("os.arch"));
+		new N5FSWriter(null);
 	}
 
 }
