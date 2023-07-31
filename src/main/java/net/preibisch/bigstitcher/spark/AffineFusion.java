@@ -1,13 +1,38 @@
 package net.preibisch.bigstitcher.spark;
 
 import java.io.IOException;
+import java.io.Closeable;
+import java.io.File;
 import java.io.Serializable;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
 
+import bdv.img.omezarr.MultiscaleImage;
+import com.amazonaws.ClientConfiguration;
+import com.amazonaws.auth.*;
+import com.amazonaws.regions.AwsRegionProvider;
+import com.amazonaws.regions.DefaultAwsRegionProviderChain;
+import com.amazonaws.retry.PredefinedBackoffStrategies;
+import com.amazonaws.retry.PredefinedRetryPolicies;
+import com.amazonaws.retry.RetryMode;
+import com.amazonaws.retry.RetryPolicy;
+import com.amazonaws.retry.v2.RetryOnStatusCodeCondition;
+import com.amazonaws.retry.v2.RetryPolicyContext;
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.google.gson.GsonBuilder;
+import mpicbg.spim.data.generic.sequence.BasicImgLoader;
+import mpicbg.spim.data.sequence.SequenceDescription;
+import net.preibisch.mvrecon.fiji.spimdata.XmlIoSpimData2;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.spark.SparkConf;
+import org.apache.spark.SparkFiles;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.janelia.saalfeldlab.n5.Compression;
@@ -17,6 +42,7 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+import org.janelia.saalfeldlab.n5.s3.AmazonS3KeyValueAccess;
 import org.janelia.saalfeldlab.n5.zarr.N5ZarrWriter;
 
 import mpicbg.spim.data.SpimDataException;
@@ -49,6 +75,7 @@ import net.preibisch.mvrecon.process.fusion.FusionTools;
 import net.preibisch.mvrecon.process.interestpointregistration.TransformationTools;
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
+import bdv.img.omezarr.ZarrImageLoader;
 
 public class AffineFusion implements Callable<Void>, Serializable
 {
@@ -56,6 +83,9 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 	@Option(names = { "-o", "--n5Path" }, required = true, description = "N5 path for saving, e.g. /home/fused.n5")
 	private String n5Path = null;
+
+	@Option(names = { "--outS3Bucket" }, description = "S3 Bucket for writing output. n5Path becomes relative to this bucket.")
+	private String outS3Bucket = null;
 
 	@Option(names = { "-d", "--n5Dataset" }, required = false, description = "N5 dataset - it is  recommended to add s0 to be able to compute a multi-resolution pyramid later, e.g. /ch488/s0")
 	private String n5Dataset = null;
@@ -137,7 +167,67 @@ public class AffineFusion implements Callable<Void>, Serializable
 			System.exit( 0 );
 		}
 
-		final SpimData2 data = Spark.getSparkJobSpimData2("", xmlPath);
+		final AmazonS3ClientBuilder S3ClientBuilder;
+		final AWSCredentials S3Credentials;
+		final String S3Region;
+		if (outS3Bucket!=null)
+		{
+			final AWSStaticCredentialsProvider credentialsProvider;
+			AWSCredentials tmpCredentials = null;
+			try {
+				tmpCredentials = new DefaultAWSCredentialsProviderChain().getCredentials();
+			}
+			catch(final Exception e) {
+				System.out.println( "Could not load AWS credentials, falling back to anonymous." );
+			}
+			credentialsProvider = new AWSStaticCredentialsProvider(tmpCredentials == null ? new AnonymousAWSCredentials() : tmpCredentials);
+			S3Region = new DefaultAwsRegionProviderChain().getRegion();
+//			RetryPolicy r = new RetryPolicy.RetryPolicyBuilder()
+//					.withBackoffStrategy(new PredefinedBackoffStrategies.ExponentialBackoffStrategy(500,20000))
+//					.withFastFailRateLimiting(false)
+//					.withHonorMaxErrorRetryInClientConfig(true).build();
+			final ClientConfiguration s3Conf = new ClientConfiguration().withRetryPolicy(PredefinedRetryPolicies.getDefaultRetryPolicyWithCustomMaxRetries(32));
+			S3ClientBuilder = AmazonS3ClientBuilder.standard()
+					.withRegion(S3Region)
+					.withCredentials(credentialsProvider)
+					.withClientConfiguration(s3Conf);
+			S3Credentials = tmpCredentials;
+		}
+		else {
+			S3Credentials = null;
+			S3ClientBuilder = null;
+			S3Region = null;
+		}
+
+		try
+		{
+			// trigger the N5-blosc error, because if it is triggered for the first
+			// time inside Spark, everything crashes
+			new N5FSWriter(null);
+		}
+		catch (Exception e ) {}
+
+		final String localXmlOutFileName = (xmlOutPath == null) ? null : new File(xmlOutPath).getName();
+		final SparkConf conf = new SparkConf().setAppName("AffineFusion");
+		// TODO: REMOVE
+		//conf.set("spark.driver.bindAddress", "127.0.0.1");
+
+		final JavaSparkContext sc = new JavaSparkContext(conf);
+//		sc.setLogLevel("ERROR");
+		sc.setLogLevel("DEBUG");
+		sc.addFile(xmlPath);
+		final String localXmlOutPath = (localXmlOutFileName == null) ? null : Paths.get(SparkFiles.getRootDirectory(),localXmlOutFileName).toString();
+		final String xmlFileName = new File(xmlPath).getName();
+
+		final SpimData2 data = Spark.getSparkJobSpimData2("", SparkFiles.get(xmlFileName));
+		final SequenceDescription sequenceDescription = data.getSequenceDescription();
+		final BasicImgLoader imgLoader = sequenceDescription.getImgLoader();
+		if (imgLoader instanceof ZarrImageLoader) {
+			final MultiscaleImage.ZarrKeyValueReaderBuilder zkvrb =
+					((ZarrImageLoader) imgLoader).getZarrKeyValueReaderBuilder();
+			zkvrb.setCredentials(S3Credentials);
+			zkvrb.setRegion(S3Region);
+		}
 
 		// select views to process
 		final ArrayList< ViewId > viewIds =
@@ -225,7 +315,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 		final String n5Path = this.n5Path;
 		final String n5Dataset = this.n5Dataset != null ? this.n5Dataset : Import.createBDVPath( this.bdvString, this.storageType );
-		final String xmlPath = this.xmlPath;
+//		final String xmlPath = this.xmlPath;
 		final StorageType storageType = this.storageType;
 		final Compression compression = new GzipCompression( 1 );
 
@@ -245,17 +335,15 @@ public class AffineFusion implements Callable<Void>, Serializable
 		final boolean useAF = preserveAnisotropy;
 		final double af = anisotropyFactor;
 
-		try
-		{
-			// trigger the N5-blosc error, because if it is triggered for the first
-			// time inside Spark, everything crashes
-			new N5FSWriter(null);
-		}
-		catch (Exception e ) {}
-
 		final N5Writer driverVolumeWriter;
-		if ( StorageType.N5.equals(storageType) )
-			driverVolumeWriter = new N5FSWriter(n5Path);
+		if ( StorageType.N5.equals(storageType) ) {
+			if (outS3Bucket==null) {
+				driverVolumeWriter = new N5FSWriter(n5Path);
+			} else {
+				driverVolumeWriter = new N5KeyValueWriter(
+						new AmazonS3KeyValueAccess(S3ClientBuilder.build(),outS3Bucket,false), n5Path, new GsonBuilder(), false);
+			}
+		}
 		else if ( StorageType.ZARR.equals(storageType) )
 			driverVolumeWriter = new N5ZarrWriter(n5Path);
 		else if ( StorageType.HDF5.equals(storageType) )
@@ -272,11 +360,10 @@ public class AffineFusion implements Callable<Void>, Serializable
 				dataType,
 				compression );
 
-		final List<long[][]> grid = Grid.create( dimensions, blockSize );
+//		final List<long[][]> grid = Grid.create( dimensions, blockSize );
 
-		/*
 		// using bigger blocksizes than being stored for efficiency (needed for very large datasets)
-
+		System.out.println( "Using 4x larger grid input blocks than output blocks and output dataset blocks");
 		final List<long[][]> grid = Grid.create(dimensions,
 				new int[] {
 						blockSize[0] * 4,
@@ -284,11 +371,9 @@ public class AffineFusion implements Callable<Void>, Serializable
 						blockSize[2] * 4
 				},
 				blockSize);
-		*/
-
-		System.out.println( "numBlocks = " + grid.size() );
 
 		driverVolumeWriter.setAttribute( n5Dataset, "offset", minBB );
+		System.out.println( "outBlksize= " + blockSize[0] + "," + blockSize[1] + "," +blockSize[2] + "; gridBlksize= outBlksize * 3; numBlocks= " + grid.size() );
 
 		// saving metadata if it is bdv-compatible (we do this first since it might fail)
 		if ( bdvString != null )
@@ -314,7 +399,17 @@ public class AffineFusion implements Callable<Void>, Serializable
 						downsamplings,
 						viewId,
 						this.n5Path,
+			BDV.writeBDVMetaData(
+					driverVolumeWriter,
+					storageType,
+					dataType,
+					dimensions,
+					compression,
+					blockSize,
+					this.bdvString,
+					this.n5Path,
 						this.xmlOutPath,
+					localXmlOutPath,
 						instantiate ) )
 				{
 					System.out.println( "Failed to write metadata for '" + n5Dataset + "'." );
@@ -327,76 +422,102 @@ public class AffineFusion implements Callable<Void>, Serializable
 				System.out.println( "Failed to write metadata for '" + n5Dataset + "': " + e );
 				return null;
 			}
+					this.angleIds,
+					this.illuminationIds, 
+					this.channelIds,
+					this.tileIds );
 
 			System.out.println( "Done writing BDV metadata.");
 		}
 
-		final SparkConf conf = new SparkConf().setAppName("AffineFusion");
-		// TODO: REMOVE
-		//conf.set("spark.driver.bindAddress", "127.0.0.1");
-
-		final JavaSparkContext sc = new JavaSparkContext(conf);
-		sc.setLogLevel("ERROR");
-
 		final JavaRDD<long[][]> rdd = sc.parallelize( grid );
 
 		final long time = System.currentTimeMillis();
+//		final String accessKeyId = S3Credentials.getAWSAccessKeyId();
+//		final String secretKey = S3Credentials.getAWSSecretKey();
 		rdd.foreach(
 				gridBlock -> {
 					// custom serialization
-					final SpimData2 dataLocal = Spark.getSparkJobSpimData2("", xmlPath);
+					final SpimData2 dataLocal = Spark.getSparkJobSpimData2("", SparkFiles.get(xmlFileName));
+					final SequenceDescription localSequenceDescription = dataLocal.getSequenceDescription();
+					final BasicImgLoader localImgLoader = localSequenceDescription.getImgLoader();
+					if (localImgLoader instanceof ZarrImageLoader) {
+						final MultiscaleImage.ZarrKeyValueReaderBuilder zkvrb =
+								((ZarrImageLoader) localImgLoader).getZarrKeyValueReaderBuilder();
+//						zkvrb.setCredentials(new BasicAWSCredentials(accessKeyId, secretKey));
+//						zkvrb.setRegion(S3Region);
+					}
 
 					// be smarter, test which ViewIds are actually needed for the block we want to fuse
 					final Interval fusedBlock =
 							Intervals.translate(
 									Intervals.translate(
-											new FinalInterval( gridBlock[1] ), // blocksize
-											gridBlock[0] ), // block offset
-									minBB ); // min of the randomaccessbileinterval
+											new FinalInterval(gridBlock[1]), // blocksize
+											gridBlock[0]), // block offset
+									minBB); // min of the randomaccessbileinterval
 
 					// recover views to process
-					final ArrayList< ViewId > viewIdsLocal = new ArrayList<>();
+					final ArrayList<ViewId> viewIdsLocal = new ArrayList<>();
 
-					for ( int i = 0; i < serializedViewIds.length; ++i )
-					{
+					for (int i = 0; i < serializedViewIds.length; ++i) {
 						final ViewId viewId = Spark.deserializeViewIds(serializedViewIds, i);
 
-						if ( useAF )
-						{
+						if (useAF) {
 							// get updated registration for views to fuse AND all other views that may influence the fusion
-							final ViewRegistration vr = dataLocal.getViewRegistrations().getViewRegistration( viewId );
+							final ViewRegistration vr = dataLocal.getViewRegistrations().getViewRegistration(viewId);
 							final AffineTransform3D aniso = new AffineTransform3D();
 							aniso.set(
 									1.0, 0.0, 0.0, 0.0,
 									0.0, 1.0, 0.0, 0.0,
-									0.0, 0.0, 1.0/af, 0.0 );
-							vr.preconcatenateTransform( new ViewTransformAffine( "preserve anisotropy", aniso));
+									0.0, 0.0, 1.0 / af, 0.0);
+							vr.preconcatenateTransform(new ViewTransformAffine("preserve anisotropy", aniso));
 							vr.updateModel();
 						}
 
 						// expand to be conservative ...
-						final Interval boundingBoxLocal = ViewUtil.getTransformedBoundingBox( dataLocal, viewId );
-						final Interval bounds = Intervals.expand( boundingBoxLocal, 2 );
+						final Interval boundingBoxLocal = ViewUtil.getTransformedBoundingBox(dataLocal, viewId);
+						final Interval bounds = Intervals.expand(boundingBoxLocal, 2);
 
-						if ( ViewUtil.overlaps( fusedBlock, bounds ) )
-							viewIdsLocal.add( viewId );
+						if (ViewUtil.overlaps(fusedBlock, bounds))
+							viewIdsLocal.add(viewId);
 					}
 
 					//SimpleMultiThreading.threadWait( 10000 );
 
 					// nothing to save...
-					if ( viewIdsLocal.size() == 0 )
+					if (viewIdsLocal.size() == 0)
 						return;
 					final RandomAccessibleInterval<FloatType> source = FusionTools.fuseVirtual(
-								dataLocal,
-								viewIdsLocal,
-								new FinalInterval(minBB, maxBB)
+							dataLocal,
+							viewIdsLocal,
+							new FinalInterval(minBB, maxBB)
 					);
 
 					final N5Writer executorVolumeWriter;
 
-					if ( StorageType.N5.equals(storageType) )
-						executorVolumeWriter = new N5FSWriter(n5Path);
+					if (StorageType.N5.equals(storageType))
+					{
+						if (outS3Bucket == null) {
+							executorVolumeWriter = new N5FSWriter(n5Path);
+						} else {
+							final AWSStaticCredentialsProvider credentialsProvider;
+							AWSCredentials exWriterCredentials = null;
+							try {
+								exWriterCredentials = new DefaultAWSCredentialsProviderChain().getCredentials();
+							}
+							catch(final Exception e) {
+								System.out.println( "Could not load AWS credentials, falling back to anonymous." );
+							}
+							credentialsProvider = new AWSStaticCredentialsProvider(exWriterCredentials == null ? new AnonymousAWSCredentials() : exWriterCredentials);
+							final String exWrRegion = new DefaultAwsRegionProviderChain().getRegion();
+							final ClientConfiguration s3Conf = new ClientConfiguration().withRetryPolicy(PredefinedRetryPolicies.getDefaultRetryPolicyWithCustomMaxRetries(32));
+							executorVolumeWriter =
+									new N5KeyValueWriter(new AmazonS3KeyValueAccess(
+											AmazonS3ClientBuilder.standard().withRegion(exWrRegion).withCredentials(credentialsProvider).withClientConfiguration(s3Conf).build(),
+											outS3Bucket, false),
+									n5Path, new GsonBuilder(), false);
+						}
+					}
 					else if ( StorageType.ZARR.equals(storageType) )
 						executorVolumeWriter = new N5ZarrWriter(n5Path);
 					else if ( StorageType.HDF5.equals(storageType) )
@@ -445,8 +566,17 @@ public class AffineFusion implements Callable<Void>, Serializable
 						final RandomAccessibleInterval<FloatType> sourceGridBlock = Views.offsetInterval(source, gridBlock[0], gridBlock[1]);
 						N5Utils.saveBlock(sourceGridBlock, executorVolumeWriter, n5Dataset, gridBlock[2]);
 					}
+					if (localImgLoader instanceof Closeable)
+					{
+						((Closeable)localImgLoader).close();
+					}
+					executorVolumeWriter.close();
 				});
 
+		if (bdvString!=null && xmlOutPath!=null) {
+			System.out.println("Copy " + localXmlOutPath + " -> " + xmlOutPath);
+			FileSystem.get(sc.hadoopConfiguration()).copyFromLocalFile(new Path(localXmlOutPath), new Path(xmlOutPath));
+		}
 		sc.close();
 
 		// close HDF5 writer
@@ -467,7 +597,6 @@ public class AffineFusion implements Callable<Void>, Serializable
 		//SimpleMultiThreading.threadHaltUnClean();
 
 		System.out.println(Arrays.toString(args));
-
 		System.exit(new CommandLine(new AffineFusion()).execute(args));
 	}
 
