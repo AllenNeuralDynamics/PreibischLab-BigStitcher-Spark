@@ -35,11 +35,7 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.SparkFiles;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.n5.Compression;
-import org.janelia.saalfeldlab.n5.DataType;
-import org.janelia.saalfeldlab.n5.GzipCompression;
-import org.janelia.saalfeldlab.n5.N5FSWriter;
-import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.*;
 import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
 import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
 import org.janelia.saalfeldlab.n5.s3.AmazonS3KeyValueAccess;
@@ -399,18 +395,8 @@ public class AffineFusion implements Callable<Void>, Serializable
 						downsamplings,
 						viewId,
 						this.n5Path,
-			BDV.writeBDVMetaData(
-					driverVolumeWriter,
-					storageType,
-					dataType,
-					dimensions,
-					compression,
-					blockSize,
-					this.bdvString,
-					this.n5Path,
-						this.xmlOutPath,
-					localXmlOutPath,
-						instantiate ) )
+						localXmlOutPath,
+						instantiate) )
 				{
 					System.out.println( "Failed to write metadata for '" + n5Dataset + "'." );
 					return null;
@@ -422,10 +408,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 				System.out.println( "Failed to write metadata for '" + n5Dataset + "': " + e );
 				return null;
 			}
-					this.angleIds,
-					this.illuminationIds, 
-					this.channelIds,
-					this.tileIds );
+
 
 			System.out.println( "Done writing BDV metadata.");
 		}
