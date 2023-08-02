@@ -210,7 +210,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 		final JavaSparkContext sc = new JavaSparkContext(conf);
 //		sc.setLogLevel("ERROR");
-		sc.setLogLevel("DEBUG");
+		sc.setLogLevel("INFO");
 		sc.addFile(xmlPath);
 		final String localXmlOutPath = (localXmlOutFileName == null) ? null : Paths.get(SparkFiles.getRootDirectory(),localXmlOutFileName).toString();
 		final String xmlFileName = new File(xmlPath).getName();
