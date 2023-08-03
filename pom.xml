@@ -76,9 +76,6 @@
     </ciManagement>
 
     <properties>
-        <!-- <scijava.jvm.version>1.8</scijava.jvm.version> -->
-<!--        <bigdataviewer-core.version>10.3.0</bigdataviewer-core.version>-->
-<!--        <spim_data.version>2.2.7</spim_data.version>-->
         <license.licenseName>gpl_v2</license.licenseName>
         <license.copyrightOwners>Developers.</license.copyrightOwners>
     </properties>
@@ -99,11 +96,6 @@
             <artifactId>bigdataviewer-core</artifactId>
             <version>10.4.6</version>
         </dependency>
-        <!-- <dependency> -->
-        <!--     <groupId>io.netty</groupId> -->
-        <!--     <artifactId>netty-all</artifactId> -->
-        <!--     <version>4.1.47.Final</version> -->
-        <!-- </dependency> -->
         <dependency>
             <groupId>sc.fiji</groupId>
             <artifactId>bigdataviewer-vistools</artifactId>
@@ -146,17 +138,7 @@
             <groupId>org.janelia.saalfeldlab</groupId>
             <artifactId>n5-aws-s3</artifactId>
             <version>4.0.0</version>
-<!--            <exclusions>-->
-<!--                <exclusion>-->
-<!--                    <groupId>org.janelia.saalfeldlab</groupId>-->
-<!--                    <artifactId>n5</artifactId>-->
-<!--                </exclusion>-->
-<!--            </exclusions>-->
         </dependency>
-        <!-- <dependency> -->
-        <!--     <groupId>ch.qos.logback</groupId> -->
-        <!--     <artifactId>logback-classic</artifactId> -->
-        <!-- </dependency> -->
 <!--        Scala is sensitive to fasterxml version -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -173,38 +155,6 @@
                     <artifactId>jcl-over-slf4j</artifactId>
                     <groupId>org.slf4j</groupId>
                 </exclusion>
-<!--                <exclusion>-->
-<!--                    <artifactId>jul-to-slf4j</artifactId>-->
-<!--                    <groupId>org.slf4j</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>slf4j-log4j12</artifactId>-->
-<!--                    <groupId>org.slf4j</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>aopalliance-repackaged</artifactId>-->
-<!--                    <groupId>org.glassfish.hk2.external</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>javax.inject</artifactId>-->
-<!--                    <groupId>org.glassfish.hk2.external</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>jersey-client</artifactId>-->
-<!--                    <groupId>org.glassfish.jersey.core</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>jersey-core</artifactId>-->
-<!--                    <groupId>com.sun.jersey</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>lz4</artifactId>-->
-<!--                    <groupId>net.jpountz.lz4</groupId>-->
-<!--                </exclusion>-->
-<!--                <exclusion>-->
-<!--                    <artifactId>jets3t</artifactId>-->
-<!--                    <groupId>net.java.dev.jets3t</groupId>-->
-<!--                </exclusion>-->
             </exclusions>
             <scope>provided</scope>
         </dependency>
@@ -213,10 +163,6 @@
             <artifactId>scala-library</artifactId>
             <version>2.12.15</version>
         </dependency>
-<!--        <dependency>-->
-<!--            <groupId>com.google.guava</groupId>-->
-<!--            <artifactId>guava</artifactId>-->
-<!--        </dependency>-->
         <dependency>
             <groupId>net.preibisch</groupId>
             <artifactId>multiview-reconstruction</artifactId>
@@ -228,17 +174,12 @@
                 </exclusion>
                 <exclusion>
                     <groupId>com.esotericsoftware</groupId>
-                    <!--                    <artifactId>kryo-shaded</artifactId>-->
                     <artifactId>reflectasm</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>com.esotericsoftware</groupId>
                     <artifactId>kryo</artifactId>
                 </exclusion>
-<!--                <exclusion>-->
-<!--                    <groupId>gov.nist.isg</groupId>-->
-<!--                    <artifactId>pyramidio</artifactId>-->
-<!--                </exclusion>-->
             </exclusions>
         </dependency>
         <dependency>
@@ -259,8 +200,6 @@
         <dependency>
             <groupId>net.java.dev.jna</groupId>
             <artifactId>jna</artifactId>
-<!--            <version>5.7.0</version>-->
-<!--            <version>5.13.0</version>-->
         </dependency>
     </dependencies>
     <groupId>net.preibisch</groupId>
@@ -320,9 +259,7 @@
                             <!-- Additional configuration. -->
                             <artifactSet>
                                 <excludes>
-<!--                                    <exclude>*jackson*</exclude>-->
-				    <!--                                    <exclude>com.github.jnr:jnr-ffi</exclude>-->
-				    <exclude>xpp3:xpp3</exclude>
+				                    <exclude>xpp3:xpp3</exclude>
                                 </excludes>
                             </artifactSet>
                             <relocations>
@@ -352,5 +289,4 @@
             </build>
         </profile>
     </profiles>
-
 </project>
