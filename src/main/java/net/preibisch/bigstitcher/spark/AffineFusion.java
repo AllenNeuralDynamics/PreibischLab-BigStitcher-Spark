@@ -369,7 +369,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 				blockSize);
 
 		driverVolumeWriter.setAttribute( n5Dataset, "offset", minBB );
-		System.out.println( "outBlksize= " + blockSize[0] + "," + blockSize[1] + "," +blockSize[2] + "; gridBlksize= outBlksize * 3; numBlocks= " + grid.size() );
+		System.out.println( "outBlksize= " + blockSize[0] + "," + blockSize[1] + "," +blockSize[2] + "; gridBlksize= outBlksize * 4; numBlocks= " + grid.size() );
 
 		// saving metadata if it is bdv-compatible (we do this first since it might fail)
 		if ( bdvString != null )
