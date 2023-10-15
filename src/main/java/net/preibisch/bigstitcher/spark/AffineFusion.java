@@ -137,6 +137,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 	// TODO: support create downsampling pyramids, null is fine for now
 	private int[][] downsamplings;
+	public static N5HDF5Writer hdf5DriverVolumeWriter = null;
 
 	@Override
 	public Void call() throws Exception
@@ -336,6 +337,8 @@ public class AffineFusion implements Callable<Void>, Serializable
 		final boolean useAF = preserveAnisotropy;
 		final double af = anisotropyFactor;
 
+		/* TODO: Move the direct S3 bucket access code to N5Util */
+//		final N5Writer driverVolumeWriter = N5Util.createWriter( n5Path, storageType );
 		final N5Writer driverVolumeWriter;
 		if ( StorageType.N5.equals(storageType) ) {
 			if (outS3Bucket==null) {
@@ -430,6 +433,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 					if (localImgLoader instanceof ZarrImageLoader) {
 						final MultiscaleImage.ZarrKeyValueReaderBuilder zkvrb =
 								((ZarrImageLoader) localImgLoader).getZarrKeyValueReaderBuilder();
+						/* This credential passing on does not work on Amazon EMR serverless - fails with unknown token */
 //						zkvrb.setCredentials(new BasicAWSCredentials(accessKeyId, secretKey));
 //						zkvrb.setRegion(S3Region);
 					}
