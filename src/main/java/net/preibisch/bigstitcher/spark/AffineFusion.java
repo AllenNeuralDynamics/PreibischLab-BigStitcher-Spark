@@ -161,6 +161,8 @@ public class AffineFusion implements Callable<Void>, Serializable
 		final String S3Region;
 		if (outS3Bucket!=null)
 		{
+			S3Region = new DefaultAwsRegionProviderChain().getRegion();
+			AWSSecurityTokenService stsClient = AWSSecurityTokenServiceClientBuilder.standard().withRegion(S3Region).build();
 			final AWSStaticCredentialsProvider credentialsProvider;
 			AWSCredentials tmpCredentials = null;
 			try {
@@ -170,7 +172,6 @@ public class AffineFusion implements Callable<Void>, Serializable
 				System.out.println( "Could not load AWS credentials, falling back to anonymous." );
 			}
 			credentialsProvider = new AWSStaticCredentialsProvider(tmpCredentials == null ? new AnonymousAWSCredentials() : tmpCredentials);
-			S3Region = new DefaultAwsRegionProviderChain().getRegion();
 //			RetryPolicy r = new RetryPolicy.RetryPolicyBuilder()
 //					.withBackoffStrategy(new PredefinedBackoffStrategies.ExponentialBackoffStrategy(500,20000))
 //					.withFastFailRateLimiting(false)
