@@ -162,7 +162,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 		if (outS3Bucket!=null)
 		{
 			S3Region = new DefaultAwsRegionProviderChain().getRegion();
-			AWSSecurityTokenService stsClient = AWSSecurityTokenServiceClientBuilder.standard().withRegion(S3Region).build();
+//			AWSSecurityTokenService stsClient = AWSSecurityTokenServiceClientBuilder.standard().withRegion(S3Region).build();
 			final AWSStaticCredentialsProvider credentialsProvider;
 			AWSCredentials tmpCredentials = null;
 			try {
@@ -365,10 +365,9 @@ public class AffineFusion implements Callable<Void>, Serializable
 				dataType,
 				compression );
 
-		final List<long[][]> grid = Grid.create( dimensions, blockSize );
+//		final List<long[][]> grid = Grid.create( dimensions, blockSize );
 
-		/*
-		// TODO: start doing this
+
 
 		// using bigger blocksizes than being stored for efficiency (needed for very large datasets)
 
@@ -379,7 +378,6 @@ public class AffineFusion implements Callable<Void>, Serializable
 						blockSize[2] * 4
 				},
 				blockSize);
-		*/
 
 		System.out.println( "numBlocks = " + grid.size() );
 		driverVolumeWriter.setAttribute( n5Dataset, "offset", minBB );
@@ -588,7 +586,13 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 		if (bdvString!=null && xmlOutPath!=null) {
 			System.out.println("Copy " + localXmlOutPath + " -> " + xmlOutPath);
-			FileSystem.get(sc.hadoopConfiguration()).copyFromLocalFile(new Path(localXmlOutPath), new Path(xmlOutPath));
+			try {
+				FileSystem.get(sc.hadoopConfiguration()).copyFromLocalFile(new Path(localXmlOutPath), new Path(xmlOutPath));
+			} catch (Exception e)
+			{
+				System.out.println("Cannot copy final xml from " + localXmlOutPath + " to " + xmlOutPath);
+				System.out.println(e.toString());
+			}
 		}
 
 		sc.close();
