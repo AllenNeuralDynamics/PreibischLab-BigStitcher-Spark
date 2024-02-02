@@ -369,11 +369,10 @@ public class AffineFusion implements Callable<Void>, Serializable
 				dataType,
 				compression );
 
-		final List<long[][]> grid = Grid.create( dimensions, blockSize );
+//		final List<long[][]> grid = Grid.create( dimensions, blockSize );
 
-		/*
+
 		// TODO: start doing this
-
 		// using bigger blocksizes than being stored for efficiency (needed for very large datasets)
 
 		final List<long[][]> grid = Grid.create(dimensions,
@@ -383,7 +382,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 						blockSize[2] * 4
 				},
 				blockSize);
-		*/
+
 
 		System.out.println( "numBlocks = " + grid.size() );
 		driverVolumeWriter.setAttribute( n5Dataset, "offset", minBB );
