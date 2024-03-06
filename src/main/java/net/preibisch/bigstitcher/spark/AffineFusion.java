@@ -1,62 +1,5 @@
 package net.preibisch.bigstitcher.spark;
 
-import bdv.img.omezarr.MultiscaleImage;
-import bdv.img.omezarr.ZarrImageLoader;
-import com.amazonaws.ClientConfiguration;
-import com.amazonaws.auth.AWSCredentials;
-import com.amazonaws.auth.AWSStaticCredentialsProvider;
-import com.amazonaws.auth.AnonymousAWSCredentials;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
-import com.amazonaws.regions.DefaultAwsRegionProviderChain;
-import com.amazonaws.retry.PredefinedRetryPolicies;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.google.gson.GsonBuilder;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import mpicbg.spim.data.registration.ViewRegistrations;
-import net.preibisch.bigstitcher.spark.util.ViewUtil.PrefetchPixel;
-import mpicbg.spim.data.SpimDataException;
-import mpicbg.spim.data.generic.sequence.BasicImgLoader;
-import mpicbg.spim.data.registration.ViewRegistration;
-import mpicbg.spim.data.registration.ViewTransformAffine;
-import mpicbg.spim.data.sequence.SequenceDescription;
-import mpicbg.spim.data.sequence.ViewId;
-import net.imglib2.FinalDimensions;
-import net.imglib2.FinalInterval;
-import net.imglib2.Interval;
-import net.imglib2.RandomAccessibleInterval;
-import net.imglib2.converter.Converters;
-import net.imglib2.realtransform.AffineTransform3D;
-import net.imglib2.type.numeric.integer.ShortType;
-import net.imglib2.type.numeric.integer.UnsignedByteType;
-import net.imglib2.type.numeric.integer.UnsignedShortType;
-import net.imglib2.type.numeric.real.FloatType;
-import net.imglib2.util.Intervals;
-import net.imglib2.util.Util;
-import net.imglib2.view.Views;
-import net.preibisch.bigstitcher.spark.util.*;
-import net.preibisch.mvrecon.fiji.spimdata.SpimData2;
-import net.preibisch.mvrecon.fiji.spimdata.boundingbox.BoundingBox;
-import net.preibisch.mvrecon.process.export.ExportN5API.StorageType;
-import net.preibisch.mvrecon.process.export.ExportTools;
-import net.preibisch.mvrecon.process.export.ExportTools.InstantiateViewSetup;
-import net.preibisch.mvrecon.process.fusion.FusionTools;
-import net.preibisch.mvrecon.process.interestpointregistration.TransformationTools;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
-import org.apache.spark.SparkConf;
-import org.apache.spark.SparkFiles;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
-import org.janelia.saalfeldlab.n5.*;
-import org.janelia.saalfeldlab.n5.hdf5.N5HDF5Writer;
-import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
-import org.janelia.saalfeldlab.n5.s3.AmazonS3KeyValueAccess;
-import org.janelia.saalfeldlab.n5.zarr.N5ZarrWriter;
-import picocli.CommandLine;
-import picocli.CommandLine.Option;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
@@ -65,8 +8,78 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
-public class AffineFusion implements Callable<Void>, Serializable
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.spark.SparkConf;
+import org.apache.spark.SparkFiles;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.VoidFunction;
+import org.janelia.saalfeldlab.n5.Compression;
+import org.janelia.saalfeldlab.n5.DataType;
+import org.janelia.saalfeldlab.n5.GzipCompression;
+import org.janelia.saalfeldlab.n5.N5FSWriter;
+import org.janelia.saalfeldlab.n5.N5Writer;
+import org.janelia.saalfeldlab.n5.imglib2.N5Utils;
+
+import com.amazonaws.ClientConfiguration;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.AnonymousAWSCredentials;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.regions.DefaultAwsRegionProviderChain;
+import com.amazonaws.retry.PredefinedRetryPolicies;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+
+import bdv.img.omezarr.MultiscaleImage;
+import bdv.img.omezarr.ZarrImageLoader;
+import mpicbg.spim.data.SpimData;
+import mpicbg.spim.data.SpimDataException;
+import mpicbg.spim.data.generic.sequence.BasicImgLoader;
+import mpicbg.spim.data.registration.ViewRegistration;
+import mpicbg.spim.data.registration.ViewRegistrations;
+import mpicbg.spim.data.registration.ViewTransformAffine;
+import mpicbg.spim.data.sequence.SequenceDescription;
+import mpicbg.spim.data.sequence.ViewId;
+import net.imglib2.FinalDimensions;
+import net.imglib2.FinalInterval;
+import net.imglib2.Interval;
+import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.converter.Converters;
+import net.imglib2.img.cell.CellGrid;
+import net.imglib2.realtransform.AffineTransform3D;
+import net.imglib2.type.NativeType;
+import net.imglib2.type.numeric.integer.ShortType;
+import net.imglib2.type.numeric.integer.UnsignedByteType;
+import net.imglib2.type.numeric.integer.UnsignedShortType;
+import net.imglib2.type.numeric.real.FloatType;
+import net.imglib2.util.Intervals;
+import net.imglib2.util.Util;
+import net.preibisch.bigstitcher.spark.AffineFusion.WriteSuperBlock.OverlappingBlocks.Prefetched;
+import net.preibisch.bigstitcher.spark.util.BDVSparkInstantiateViewSetup;
+import net.preibisch.bigstitcher.spark.util.Downsampling;
+import net.preibisch.bigstitcher.spark.util.Grid;
+import net.preibisch.bigstitcher.spark.util.Import;
+import net.preibisch.bigstitcher.spark.util.N5Util;
+import net.preibisch.bigstitcher.spark.util.Spark;
+import net.preibisch.bigstitcher.spark.util.ViewUtil;
+import net.preibisch.bigstitcher.spark.util.ViewUtil.PrefetchPixel;
+import net.preibisch.mvrecon.fiji.spimdata.SpimData2;
+import net.preibisch.mvrecon.fiji.spimdata.boundingbox.BoundingBox;
+import net.preibisch.mvrecon.process.export.ExportN5API.StorageType;
+import net.preibisch.mvrecon.process.export.ExportTools;
+import net.preibisch.mvrecon.process.export.ExportTools.InstantiateViewSetup;
+import net.preibisch.mvrecon.process.fusion.FusionTools;
+import net.preibisch.mvrecon.process.interestpointregistration.TransformationTools;
+import picocli.CommandLine;
+import picocli.CommandLine.Option;
+
+
+public class AffineFusion implements Callable< Void >, Serializable
 {
 	private static final long serialVersionUID = -6103761116219617153L;
 
@@ -121,6 +134,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 	@Option(names = { "-ds", "--downsampling" }, split = ";", required = false, description = "Manually define steps to create of a multi-resolution pyramid (e.g. -ds 2,2,1; 2,2,1; 2,2,2; 2,2,2)")
 	private List<String> downsampling = null;
+
 	@Option(names = { "--preserveAnisotropy" }, description = "preserve the anisotropy of the data (default: false)")
 	private boolean preserveAnisotropy = false;
 
@@ -142,7 +156,14 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 	// TODO: support create downsampling pyramids, null is fine for now
 	private int[][] downsamplings;
-	public static N5HDF5Writer hdf5DriverVolumeWriter = null;
+
+
+	/**
+	 * Assumes that
+	 * at most 8 views are required per output block, and
+	 * at most 8 input blocks per output block are required from one input view per output block.
+	 */
+	static final int N_PREFETCH_THREADS = 72;
 
 	@Override
 	public Void call() throws Exception
@@ -161,9 +182,9 @@ public class AffineFusion implements Callable<Void>, Serializable
 			return null;
 		}
 
-		final AmazonS3ClientBuilder S3ClientBuilder;
-		final AWSCredentials S3Credentials;
-		final String S3Region;
+		final AmazonS3ClientBuilder s3ClientBuilder;
+		final AWSCredentials s3Credentials;
+		final String s3Region;
 		if (outS3Bucket!=null)
 		{
 			final AWSStaticCredentialsProvider credentialsProvider;
@@ -175,22 +196,22 @@ public class AffineFusion implements Callable<Void>, Serializable
 				System.out.println( "Could not load AWS credentials, falling back to anonymous." );
 			}
 			credentialsProvider = new AWSStaticCredentialsProvider(tmpCredentials == null ? new AnonymousAWSCredentials() : tmpCredentials);
-			S3Region = new DefaultAwsRegionProviderChain().getRegion();
+			s3Region = new DefaultAwsRegionProviderChain().getRegion();
 //			RetryPolicy r = new RetryPolicy.RetryPolicyBuilder()
 //					.withBackoffStrategy(new PredefinedBackoffStrategies.ExponentialBackoffStrategy(500,20000))
 //					.withFastFailRateLimiting(false)
 //					.withHonorMaxErrorRetryInClientConfig(true).build();
-			final ClientConfiguration s3Conf = new ClientConfiguration().withRetryPolicy(PredefinedRetryPolicies.getDefaultRetryPolicyWithCustomMaxRetries(32));
-			S3ClientBuilder = AmazonS3ClientBuilder.standard()
-					.withRegion(S3Region)
+			final ClientConfiguration s3Conf = new ClientConfiguration().withRetryPolicy( PredefinedRetryPolicies.getDefaultRetryPolicyWithCustomMaxRetries(32));
+			s3ClientBuilder = AmazonS3ClientBuilder.standard()
+					.withRegion(s3Region)
 					.withCredentials(credentialsProvider)
 					.withClientConfiguration(s3Conf);
-			S3Credentials = tmpCredentials;
+			s3Credentials = tmpCredentials;
 		}
 		else {
-			S3Credentials = null;
-			S3ClientBuilder = null;
-			S3Region = null;
+			s3Credentials = null;
+			s3ClientBuilder = null;
+			s3Region = null;
 		}
 
 		try
@@ -216,11 +237,11 @@ public class AffineFusion implements Callable<Void>, Serializable
 		final SpimData2 data = Spark.getSparkJobSpimData2("", SparkFiles.get(xmlFileName));
 		final SequenceDescription sequenceDescription = data.getSequenceDescription();
 		final BasicImgLoader imgLoader = sequenceDescription.getImgLoader();
-		if (imgLoader instanceof ZarrImageLoader) {
+		if (imgLoader instanceof ZarrImageLoader ) {
 			final MultiscaleImage.ZarrKeyValueReaderBuilder zkvrb =
 					((ZarrImageLoader) imgLoader).getZarrKeyValueReaderBuilder();
-			zkvrb.setCredentials(S3Credentials);
-			zkvrb.setRegion(S3Region);
+			zkvrb.setCredentials(s3Credentials);
+			zkvrb.setRegion(s3Region);
 		}
 
 		// select views to process
@@ -322,13 +343,10 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 		final String n5Path = this.n5Path;
 		final String n5Dataset = this.n5Dataset != null ? this.n5Dataset : Import.createBDVPath( this.bdvString, this.storageType );
-//		final String xmlPath = this.xmlPath;
 		final StorageType storageType = this.storageType;
 		final Compression compression = new GzipCompression( 1 );
 
-		final boolean uint8 = this.uint8;
-		final boolean uint16 = this.uint16;
-		final double minIntensity = (uint8 || uint16 ) ? this.minIntensity : 0;
+		final double minIntensity = ( uint8 || uint16 ) ? this.minIntensity : 0;
 		final double range;
 		if ( uint8 )
 			range = ( this.maxIntensity - this.minIntensity ) / 255.0;
@@ -339,26 +357,8 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 		// TODO: improve (e.g. make ViewId serializable)
 		final int[][] serializedViewIds = Spark.serializeViewIds(viewIds);
-		final boolean useAF = preserveAnisotropy;
-		final double af = anisotropyFactor;
 
-		/* TODO: Move the direct S3 bucket access code to N5Util */
-//		final N5Writer driverVolumeWriter = N5Util.createWriter( n5Path, storageType );
-		final N5Writer driverVolumeWriter;
-		if ( StorageType.N5.equals(storageType) ) {
-			if (outS3Bucket==null) {
-				driverVolumeWriter = new N5FSWriter(n5Path);
-			} else {
-				driverVolumeWriter = new N5KeyValueWriter(
-						new AmazonS3KeyValueAccess(S3ClientBuilder.build(),outS3Bucket,false), n5Path, new GsonBuilder(), false);
-			}
-		}
-		else if ( StorageType.ZARR.equals(storageType) )
-			driverVolumeWriter = new N5ZarrWriter(n5Path);
-		else if ( StorageType.HDF5.equals(storageType) )
-			driverVolumeWriter = hdf5DriverVolumeWriter = new N5HDF5Writer(n5Path);
-		else
-			throw new RuntimeException( "storageType " + storageType + " not supported." );
+		final N5Writer driverVolumeWriter = N5Util.createWriter( s3ClientBuilder, outS3Bucket, n5Path, storageType );
 
 		System.out.println( "Format being written: " + storageType );
 
@@ -371,10 +371,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 //		final List<long[][]> grid = Grid.create( dimensions, blockSize );
 
-
-		// TODO: start doing this
 		// using bigger blocksizes than being stored for efficiency (needed for very large datasets)
-
 		final List<long[][]> grid = Grid.create(dimensions,
 				new int[] {
 						blockSize[0] * 4,
@@ -409,7 +406,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 						viewId,
 						this.n5Path,
 						localXmlOutPath,
-						instantiate) )
+						instantiate ) )
 				{
 					System.out.println( "Failed to write metadata for '" + n5Dataset + "'." );
 					return null;
@@ -428,169 +425,21 @@ public class AffineFusion implements Callable<Void>, Serializable
 		final JavaRDD<long[][]> rdd = sc.parallelize( grid );
 
 		final long time = System.currentTimeMillis();
-		rdd.foreach(
-				gridBlock -> {
-					final long[] gridBlockSize = gridBlock[ 1 ];
-					final long[] gridBlockOffset = gridBlock[ 0 ];
-
-					// custom serialization
-					final SpimData2 dataLocal = Spark.getSparkJobSpimData2("", SparkFiles.get(xmlFileName));
-					final List< ViewId > viewIds2 = Spark.deserializeViewIds( serializedViewIds );
-					final SequenceDescription localSequenceDescription = dataLocal.getSequenceDescription();
-					final BasicImgLoader localImgLoader = localSequenceDescription.getImgLoader();
-					if (localImgLoader instanceof ZarrImageLoader) {
-						final MultiscaleImage.ZarrKeyValueReaderBuilder zkvrb =
-								((ZarrImageLoader) localImgLoader).getZarrKeyValueReaderBuilder();
-						/* This credential passing on does not work on Amazon EMR serverless - fails with unknown token */
-//						zkvrb.setCredentials(new BasicAWSCredentials(accessKeyId, secretKey));
-//						zkvrb.setRegion(S3Region);
-					}
-
-					// be smarter, test which ViewIds are actually needed for the block we want to fuse
-					final Interval fusedBlock =
-							Intervals.translate(
-									FinalInterval.createMinSize( gridBlockOffset, gridBlockSize ),
-									minBB); // min of the randomaccessbileinterval
-
-					// recover views to process
-					final ArrayList<ViewId> viewIdsLocal = new ArrayList<>();
-					final List< Callable< Object > > prefetch = new ArrayList<>();
-
-					if ( useAF )
-					{
-						final AffineTransform3D aniso = new AffineTransform3D();
-						aniso.set(
-								1.0, 0.0, 0.0, 0.0,
-								0.0, 1.0, 0.0, 0.0,
-								0.0, 0.0, 1.0 / af, 0.0 );
-						final ViewTransformAffine preserveAnisotropy = new ViewTransformAffine( "preserve anisotropy", aniso );
-
-						final ViewRegistrations registrations = dataLocal.getViewRegistrations();
-						for ( final ViewId viewId : viewIds2 )
-						{
-							// get updated registration for views to fuse AND all other views that may influence the fusion
-							final ViewRegistration vr = registrations.getViewRegistration( viewId );
-							vr.preconcatenateTransform( preserveAnisotropy );
-							vr.updateModel();
-						}
-					}
-
-					for ( final ViewId viewId : viewIds2 )
-					{
-						// expand to be conservative ...
-						final Interval boundingBoxLocal = ViewUtil.getTransformedBoundingBox(dataLocal, viewId);
-						final Interval bounds = Intervals.expand(boundingBoxLocal, 2);
-
-						if (ViewUtil.overlaps(fusedBlock, bounds))
-						{
-							// determine which Cells exactly we need to compute the fused block
-							final List< PrefetchPixel< ? > > blocks = ViewUtil.findOverlappingBlocks( dataLocal, viewId, fusedBlock );
-							if ( !blocks.isEmpty() )
-							{
-								prefetch.addAll( blocks );
-								viewIdsLocal.add( viewId );
-							}
-						}
-					}
-
-					//SimpleMultiThreading.threadWait( 10000 );
-
-					// nothing to save...
-					if (viewIdsLocal.size() == 0)
-						return;
-
-					// prefetch cells: each cell on a separate thread
-					final ExecutorService executor = Executors.newFixedThreadPool( prefetch.size() );
-					final List< Future< Object > > prefetched = executor.invokeAll( prefetch );
-					executor.shutdown();
-
-					final RandomAccessibleInterval<FloatType> source = FusionTools.fuseVirtual(
-							dataLocal,
-							viewIdsLocal,
-							new FinalInterval(minBB, maxBB)
-					);
-
-					final N5Writer executorVolumeWriter;
-
-					if (StorageType.N5.equals(storageType))
-					{
-						if (outS3Bucket == null) {
-							executorVolumeWriter = new N5FSWriter(n5Path);
-						} else {
-							final AWSStaticCredentialsProvider credentialsProvider;
-							AWSCredentials exWriterCredentials = null;
-							try {
-								exWriterCredentials = new DefaultAWSCredentialsProviderChain().getCredentials();
-							}
-							catch(final Exception e) {
-								System.out.println( "Could not load AWS credentials, falling back to anonymous." );
-							}
-							credentialsProvider = new AWSStaticCredentialsProvider(exWriterCredentials == null ? new AnonymousAWSCredentials() : exWriterCredentials);
-							final String exWrRegion = new DefaultAwsRegionProviderChain().getRegion();
-							final ClientConfiguration s3Conf = new ClientConfiguration().withRetryPolicy(PredefinedRetryPolicies.getDefaultRetryPolicyWithCustomMaxRetries(32));
-							executorVolumeWriter =
-									new N5KeyValueWriter(new AmazonS3KeyValueAccess(
-											AmazonS3ClientBuilder.standard().withRegion(exWrRegion).withCredentials(credentialsProvider).withClientConfiguration(s3Conf).build(),
-											outS3Bucket, false),
-									n5Path, new GsonBuilder(), false);
-						}
-					}
-					else if ( StorageType.ZARR.equals(storageType) )
-						executorVolumeWriter = new N5ZarrWriter(n5Path);
-					else if ( StorageType.HDF5.equals(storageType) )
-						executorVolumeWriter = hdf5DriverVolumeWriter;
-					else
-						throw new RuntimeException( "storageType " + storageType + " not supported." );
-
-					if ( uint8 )
-					{
-						final RandomAccessibleInterval< UnsignedByteType > sourceUINT8 =
-								Converters.convert(
-										source,(i, o) -> o.setReal( ( i.get() - minIntensity ) / range ),
-										new UnsignedByteType());
-
-						final RandomAccessibleInterval<UnsignedByteType> sourceGridBlock = Views.offsetInterval(sourceUINT8, gridBlockOffset, gridBlockSize );
-						//N5Utils.saveNonEmptyBlock(sourceGridBlock, n5Writer, n5Dataset, gridBlock[2], new UnsignedByteType());
-						N5Utils.saveBlock(sourceGridBlock, executorVolumeWriter, n5Dataset, gridBlock[2]);
-					}
-					else if ( uint16 )
-					{
-						final RandomAccessibleInterval< UnsignedShortType > sourceUINT16 =
-								Converters.convert(
-										source,(i, o) -> o.setReal( ( i.get() - minIntensity ) / range ),
-										new UnsignedShortType());
-
-						if ( bdvString != null && StorageType.HDF5.equals( storageType ) )
-						{
-							// Tobias: unfortunately I store as short and treat it as unsigned short in Java.
-							// The reason is, that when I wrote this, the jhdf5 library did not support unsigned short. It's terrible and should be fixed.
-							// https://github.com/bigdataviewer/bigdataviewer-core/issues/154
-							// https://imagesc.zulipchat.com/#narrow/stream/327326-BigDataViewer/topic/XML.2FHDF5.20specification
-							final RandomAccessibleInterval< ShortType > sourceINT16 =
-									Converters.convertRAI( sourceUINT16, (i,o)->o.set( i.getShort() ), new ShortType() );
-
-							final RandomAccessibleInterval<ShortType> sourceGridBlock = Views.offsetInterval(sourceINT16, gridBlockOffset, gridBlockSize );
-							N5Utils.saveBlock(sourceGridBlock, executorVolumeWriter, n5Dataset, gridBlock[2]);
-						}
-						else
-						{
-							final RandomAccessibleInterval<UnsignedShortType> sourceGridBlock = Views.offsetInterval(sourceUINT16, gridBlockOffset, gridBlockSize );
-							N5Utils.saveBlock(sourceGridBlock, executorVolumeWriter, n5Dataset, gridBlock[2]);
-						}
-					}
-					else
-					{
-						final RandomAccessibleInterval<FloatType> sourceGridBlock = Views.offsetInterval(source, gridBlockOffset, gridBlockSize );
-						N5Utils.saveBlock(sourceGridBlock, executorVolumeWriter, n5Dataset, gridBlock[2]);
-					}
-
-					// let go of references to the prefetched cells
-					prefetched.clear();
-
-					// not HDF5
-					if ( N5Util.hdf5DriverVolumeWriter != executorVolumeWriter )
-						executorVolumeWriter.close();
-				});
+		rdd.foreach( new WriteSuperBlock(
+				xmlPath,
+				preserveAnisotropy,
+				anisotropyFactor,
+				boundingBox,
+				n5Path,
+				n5Dataset,
+				bdvString,
+				storageType,
+				serializedViewIds,
+				uint8,
+				uint16,
+				minIntensity,
+				range,
+				blockSize ) );
 
 		if ( this.downsamplings != null )
 		{
@@ -609,9 +458,10 @@ public class AffineFusion implements Callable<Void>, Serializable
 					sc );
 		}
 
-		if (bdvString!=null && xmlOutPath!=null) {
-			System.out.println("Copy " + localXmlOutPath + " -> " + xmlOutPath);
-			FileSystem.get(sc.hadoopConfiguration()).copyFromLocalFile(new Path(localXmlOutPath), new Path(xmlOutPath));
+		if ( bdvString != null && xmlOutPath != null )
+		{
+			System.out.println( "Copy " + localXmlOutPath + " -> " + xmlOutPath );
+			FileSystem.get( sc.hadoopConfiguration() ).copyFromLocalFile( new Path( localXmlOutPath ), new Path( xmlOutPath ) );
 		}
 
 		sc.close();
@@ -623,6 +473,7 @@ public class AffineFusion implements Callable<Void>, Serializable
 			System.out.println( "Saved, e.g. view with './n5-view -i " + n5Path + " -d " + n5Dataset );
 
 		System.out.println( "done, took: " + (System.currentTimeMillis() - time ) + " ms." );
+
 		return null;
 	}
 
@@ -638,4 +489,363 @@ public class AffineFusion implements Callable<Void>, Serializable
 		System.exit(new CommandLine(new AffineFusion()).execute(args));
 	}
 
+
+
+
+
+
+
+	static class WriteSuperBlock implements VoidFunction< long[][] >
+	{
+		private final String xmlPath;
+
+		private final boolean preserveAnisotropy;
+
+		private final double anisotropyFactor;
+
+		private final long[] minBB;
+
+		private final String n5Path;
+
+		private final String n5Dataset;
+
+		private final String bdvString;
+
+		private final StorageType storageType;
+
+		private final int[][] serializedViewIds;
+
+		private final boolean uint8;
+
+		private final boolean uint16;
+
+		private final double minIntensity;
+
+		private final double range;
+
+		private final int[] blockSize;
+
+		public WriteSuperBlock(
+				final String xmlPath,
+				final boolean preserveAnisotropy,
+				final double anisotropyFactor,
+				final BoundingBox boundingBox, // TODO --> minBB --> rename to "offset" or something?
+				final String n5Path,
+				final String n5Dataset,
+				final String bdvString,
+				final StorageType storageType,
+				final int[][] serializedViewIds,
+				final boolean uint8,
+				final boolean uint16,
+				final double minIntensity,
+				final double range,
+				final int[] blockSize )
+		{
+			this.xmlPath = xmlPath;
+			this.preserveAnisotropy = preserveAnisotropy;
+			this.anisotropyFactor = anisotropyFactor;
+			this.minBB = boundingBox.minAsLongArray();
+			this.n5Path = n5Path;
+			this.n5Dataset = n5Dataset;
+			this.bdvString = bdvString;
+			this.storageType = storageType;
+			this.serializedViewIds = serializedViewIds;
+			this.uint8 = uint8;
+			this.uint16 = uint16;
+			this.minIntensity = minIntensity;
+			this.range = range;
+			this.blockSize = blockSize;
+		}
+
+
+		/**
+		 * Find all views among the given {@code viewIds} that overlap the given {@code interval}.
+		 * The image interval of each view is transformed into world coordinates
+		 * and checked for overlap with {@code interval}, with a conservative
+		 * extension of 2 pixels in each direction.
+		 *
+		 * @param spimData contains bounds and registrations for all views
+		 * @param viewIds which views to check
+		 * @param interval interval in world coordinates
+		 * @return views that overlap {@code interval}
+		 */
+		private static List<ViewId> findOverlappingViews(
+				final SpimData spimData,
+				final List<ViewId> viewIds,
+				final Interval interval )
+		{
+			final List< ViewId > overlapping = new ArrayList<>();
+
+			// expand to be conservative ...
+			final Interval expandedInterval = Intervals.expand( interval, 2 );
+
+			for ( final ViewId viewId : viewIds )
+			{
+				final Interval bounds = ViewUtil.getTransformedBoundingBox( spimData, viewId );
+				if ( ViewUtil.overlaps( expandedInterval, bounds ) )
+					overlapping.add( viewId );
+			}
+
+			return overlapping;
+		}
+
+
+
+		static class OverlappingBlocks
+		{
+			private final List< ViewId > overlappingViews;
+
+			private final List< Callable< Object > > prefetchBlocks;
+
+			public OverlappingBlocks(
+					final List< ViewId > overlappingViews,
+					final List< Callable< Object > > prefetchBlocks )
+			{
+				this.overlappingViews = overlappingViews;
+				this.prefetchBlocks = prefetchBlocks;
+			}
+
+			public List< ViewId > overlappingViews()
+			{
+				return overlappingViews;
+			}
+
+			/**
+			 * Result of {@link OverlappingBlocks#prefetch}. Holds strong
+			 * references to prefetched data, until it is {@link #close()
+			 * closed}.
+			 */
+			public static class Prefetched implements AutoCloseable
+			{
+				private final List< Future< Object > > prefetched;
+
+				public Prefetched( final List< Future< Object > > prefetched )
+				{
+					this.prefetched = prefetched;
+				}
+
+				@Override
+				public void close() throws Exception
+				{
+					// let go of references to the prefetched cells
+					prefetched.clear();
+				}
+			}
+
+			// TODO: javadoc
+			public Prefetched prefetch( final ExecutorService executor ) throws InterruptedException
+			{
+				return new Prefetched( executor.invokeAll( prefetchBlocks ) );
+			}
+		}
+
+		// TODO: javadoc
+		private static OverlappingBlocks findOverlappingBlocks(
+				final SpimData spimData,
+				final List<ViewId> viewIds,
+				Interval interval )
+		{
+			final List< ViewId > overlapping = new ArrayList<>();
+			final List< Callable< Object > > prefetch = new ArrayList<>();
+
+			// expand to be conservative ...
+			final Interval expandedInterval = Intervals.expand( interval, 2 );
+
+			for ( final ViewId viewId : viewIds )
+			{
+				final Interval bounds = ViewUtil.getTransformedBoundingBox( spimData, viewId );
+				if ( ViewUtil.overlaps( expandedInterval, bounds ) )
+				{
+					// determine which Cells exactly we need to compute the fused block
+					final List< PrefetchPixel< ? > > blocks = ViewUtil.findOverlappingBlocks( spimData, viewId, interval );
+					if ( !blocks.isEmpty() )
+					{
+						prefetch.addAll( blocks );
+						overlapping.add( viewId );
+					}
+				}
+			}
+
+			return new OverlappingBlocks( overlapping, prefetch );
+		}
+
+
+		private < T extends NativeType< T > > RandomAccessibleInterval< T > convertToOutputType( RandomAccessibleInterval< FloatType > rai )
+		{
+			if ( uint8 )
+			{
+				return ( RandomAccessibleInterval< T > ) Converters.convert(
+						rai, ( i, o ) -> o.setReal( ( i.get() - minIntensity ) / range ),
+						new UnsignedByteType() );
+			}
+			else if ( uint16 )
+			{
+				if ( bdvString != null && StorageType.HDF5.equals( storageType ) )
+				{
+					// TODO (TP): Revise the following .. This is probably fixed now???
+					// Tobias: unfortunately I store as short and treat it as unsigned short in Java.
+					// The reason is, that when I wrote this, the jhdf5 library did not support unsigned short. It's terrible and should be fixed.
+					// https://github.com/bigdataviewer/bigdataviewer-core/issues/154
+					// https://imagesc.zulipchat.com/#narrow/stream/327326-BigDataViewer/topic/XML.2FHDF5.20specification
+					return ( RandomAccessibleInterval< T > ) Converters.convert(
+							rai, ( i, o ) -> o.set( UnsignedShortType.getCodedSignedShort( ( int ) Util.round( ( i.get() - minIntensity ) / range ) ) ),
+							new ShortType() );
+				}
+				else
+				{
+					return ( RandomAccessibleInterval< T > ) Converters.convert(
+							rai, ( i, o ) -> o.setReal( ( i.get() - minIntensity ) / range ),
+							new UnsignedShortType() );
+				}
+			}
+			else
+			{
+				return ( RandomAccessibleInterval< T > ) rai;
+			}
+		}
+
+		static class Log
+		{
+			private final long startTimeMillis;
+
+			private final String prefix;
+
+			Log( final long[][] gridBlock )
+			{
+				startTimeMillis = System.currentTimeMillis();
+
+				final long[] outputGridOffset = gridBlock[ 2 ];
+				prefix = Arrays.toString( outputGridOffset );
+			}
+
+			void println()
+			{
+				println( "" );
+			}
+
+			void println( final String msg )
+			{
+				final long t = System.currentTimeMillis() - startTimeMillis;
+				System.out.println( prefix + " (t=" + t + ") " + msg );
+			}
+		}
+
+		@Override
+		public void call( final long[][] gridBlock ) throws Exception
+		{
+			Log out = new Log( gridBlock );
+			out.println( "starting" );
+
+			final int n = blockSize.length;
+
+			// The min coordinates of the block that this job renders (in pixels)
+			final long[] superBlockOffset = new long[ n ];
+			Arrays.setAll( superBlockOffset, d -> gridBlock[ 0 ][ d ] + minBB[ d ] );
+
+			// The size of the block that this job renders (in pixels)
+			final long[] superBlockSize = gridBlock[ 1 ];
+
+			// The min grid coordinate of the block that this job renders, in units of the output grid.
+			// Note, that the block that is rendered may cover multiple output grid cells.
+			final long[] outputGridOffset = gridBlock[ 2 ];
+
+
+			// --------------------------------------------------------
+			// initialization work that is happening in every job,
+			// independent of gridBlock parameters
+			// --------------------------------------------------------
+
+			// custom serialization
+			out.println( "loading SpimData" );
+			final SpimData2 dataLocal = Spark.getSparkJobSpimData2("", xmlPath);
+			final List< ViewId > viewIds = Spark.deserializeViewIds( serializedViewIds );
+
+			// If requested, preserve the anisotropy of the data (such that
+			// output data has the same anisotropy as input data) by prepending
+			// an affine to each ViewRegistration
+			out.println( "preprocessing SpimData" );
+			if ( preserveAnisotropy )
+			{
+				final AffineTransform3D aniso = new AffineTransform3D();
+				aniso.set(
+						1.0, 0.0, 0.0, 0.0,
+						0.0, 1.0, 0.0, 0.0,
+						0.0, 0.0, 1.0 / anisotropyFactor, 0.0 );
+				final ViewTransformAffine preserveAnisotropy = new ViewTransformAffine( "preserve anisotropy", aniso );
+
+				final ViewRegistrations registrations = dataLocal.getViewRegistrations();
+				for ( final ViewId viewId : viewIds )
+				{
+					final ViewRegistration vr = registrations.getViewRegistration( viewId );
+					vr.preconcatenateTransform( preserveAnisotropy );
+					vr.updateModel();
+				}
+			}
+
+
+
+			final long[] gridPos = new long[ n ];
+			final long[] fusedBlockMin = new long[ n ];
+			final long[] fusedBlockMax = new long[ n ];
+			final Interval fusedBlock = FinalInterval.wrap( fusedBlockMin, fusedBlockMax );
+
+			// pre-filter views that overlap the superBlock
+			Arrays.setAll( fusedBlockMin, d -> superBlockOffset[ d ] );
+			Arrays.setAll( fusedBlockMax, d -> superBlockOffset[ d ] + superBlockSize[ d ] - 1 );
+			out.println( "findOverlappingViews" );
+			final List< ViewId > overlappingViews = findOverlappingViews( dataLocal, viewIds, fusedBlock );
+
+			final N5Writer executorVolumeWriter = N5Util.createWriter( n5Path, storageType );
+			final ExecutorService prefetchExecutor = Executors.newFixedThreadPool( N_PREFETCH_THREADS );
+
+			final CellGrid blockGrid = new CellGrid( superBlockSize, blockSize );
+			final int numCells = ( int ) Intervals.numElements( blockGrid.getGridDimensions() );
+			for ( int gridIndex = 0; gridIndex < numCells; ++gridIndex )
+			{
+				out.println( "starting sub-block (block " + gridIndex + ")" );
+				blockGrid.getCellGridPositionFlat( gridIndex, gridPos );
+				blockGrid.getCellInterval( gridPos, fusedBlockMin, fusedBlockMax );
+
+				for ( int d = 0; d < n; ++d )
+				{
+					gridPos[ d ] += outputGridOffset[ d ];
+					fusedBlockMin[ d ] += superBlockOffset[ d ];
+					fusedBlockMax[ d ] += superBlockOffset[ d ];
+				}
+				// gridPos is now the grid coordinate in the N5 output
+
+				out.println( "find overlapping cells to prefetch (block " + gridIndex + ")" );
+				// determine which Cells and Views we need to compute the fused block
+				final OverlappingBlocks overlappingBlocks = findOverlappingBlocks( dataLocal, overlappingViews, fusedBlock );
+				out.println( "found " + overlappingBlocks.overlappingViews.size() + " cells to prefetch (block " + gridIndex + ")" );
+
+				if ( overlappingBlocks.overlappingViews().isEmpty() )
+					continue;
+
+				out.println( "start prefetching (block " + gridIndex + ")" );
+				try ( Prefetched prefetched = overlappingBlocks.prefetch( prefetchExecutor ) )
+				{
+					out.println( "prefetching done (block " + gridIndex + ")" );
+					// TODO (TP) Can we go lower-level here? This does redundant view filtering internally:
+					final RandomAccessibleInterval< FloatType > source = FusionTools.fuseVirtual(
+							dataLocal,
+							overlappingBlocks.overlappingViews(),
+							fusedBlock );
+
+					// TODO (TP) make generics work here:
+					final RandomAccessibleInterval convertedSource = convertToOutputType( source );
+					out.println( "start writing (block " + gridIndex + ")" );
+					N5Utils.saveBlock( convertedSource, executorVolumeWriter, n5Dataset, gridPos );
+					out.println( "writing done (block " + gridIndex + ")" );
+				}
+			}
+			prefetchExecutor.shutdown();
+
+			// not HDF5
+			if ( N5Util.hdf5DriverVolumeWriter != executorVolumeWriter )
+				executorVolumeWriter.close();
+
+			out.println( "done" );
+		}
+	}
 }
