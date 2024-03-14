@@ -374,9 +374,9 @@ public class AffineFusion implements Callable< Void >, Serializable
 		// using bigger blocksizes than being stored for efficiency (needed for very large datasets)
 		final List<long[][]> grid = Grid.create(dimensions,
 				new int[] {
-						blockSize[0] * 4,
-						blockSize[1] * 4,
-						blockSize[2] * 4
+						blockSize[0] * 16,
+						blockSize[1] * 16,
+						blockSize[2] * 16
 				},
 				blockSize);
 
