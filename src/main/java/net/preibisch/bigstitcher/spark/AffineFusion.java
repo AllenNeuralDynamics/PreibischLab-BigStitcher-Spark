@@ -430,6 +430,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 				preserveAnisotropy,
 				anisotropyFactor,
 				boundingBox,
+				outS3Bucket,
 				n5Path,
 				n5Dataset,
 				bdvString,
@@ -511,6 +512,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 
 		private final long[] minBB;
 
+		private final String outS3Bucket;
 		private final String n5Path;
 
 		private final String n5Dataset;
@@ -536,6 +538,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 				final boolean preserveAnisotropy,
 				final double anisotropyFactor,
 				final BoundingBox boundingBox, // TODO --> minBB --> rename to "offset" or something?
+				final String outS3Bucket,
 				final String n5Path,
 				final String n5Dataset,
 				final String bdvString,
@@ -551,6 +554,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 			this.preserveAnisotropy = preserveAnisotropy;
 			this.anisotropyFactor = anisotropyFactor;
 			this.minBB = boundingBox.minAsLongArray();
+			this.outS3Bucket = outS3Bucket;
 			this.n5Path = n5Path;
 			this.n5Dataset = n5Dataset;
 			this.bdvString = bdvString;
@@ -800,8 +804,20 @@ public class AffineFusion implements Callable< Void >, Serializable
 			Arrays.setAll( fusedBlockMax, d -> superBlockOffset[ d ] + superBlockSize[ d ] - 1 );
 			out.println( "findOverlappingViews" );
 			final List< ViewId > overlappingViews = findOverlappingViews( dataLocal, viewIds, fusedBlock );
+			final N5Writer executorVolumeWriter;
+			if (outS3Bucket != null)
+			{
+				final ClientConfiguration s3Conf = new ClientConfiguration().withRetryPolicy(PredefinedRetryPolicies.getDefaultRetryPolicyWithCustomMaxRetries(32));
+				final AmazonS3ClientBuilder s3ClientBuilder = AmazonS3ClientBuilder.standard()
+						.withRegion(new DefaultAwsRegionProviderChain().getRegion())
+						.withCredentials(new DefaultAWSCredentialsProviderChain()).withClientConfiguration(s3Conf);
+				executorVolumeWriter = N5Util.createWriter( s3ClientBuilder, outS3Bucket, n5Path, storageType );
+			}
+			else
+			{
+				executorVolumeWriter = N5Util.createWriter( n5Path, storageType );
+			}
 
-			final N5Writer executorVolumeWriter = N5Util.createWriter( n5Path, storageType );
 			final ExecutorService prefetchExecutor = Executors.newFixedThreadPool( N_PREFETCH_THREADS );
 
 			final CellGrid blockGrid = new CellGrid( superBlockSize, blockSize );
