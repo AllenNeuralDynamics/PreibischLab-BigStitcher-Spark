@@ -426,7 +426,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 
 		final long time = System.currentTimeMillis();
 		rdd.foreach( new WriteSuperBlock(
-				xmlPath,
+				xmlFileName,
 				preserveAnisotropy,
 				anisotropyFactor,
 				boundingBox,
@@ -503,7 +503,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 
 	static class WriteSuperBlock implements VoidFunction< long[][] >
 	{
-		private final String xmlPath;
+		private final String xmlFileName;
 
 		private final boolean preserveAnisotropy;
 
@@ -532,7 +532,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 		private final int[] blockSize;
 
 		public WriteSuperBlock(
-				final String xmlPath,
+				final String xmlFileName,
 				final boolean preserveAnisotropy,
 				final double anisotropyFactor,
 				final BoundingBox boundingBox, // TODO --> minBB --> rename to "offset" or something?
@@ -547,7 +547,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 				final double range,
 				final int[] blockSize )
 		{
-			this.xmlPath = xmlPath;
+			this.xmlFileName = xmlFileName;
 			this.preserveAnisotropy = preserveAnisotropy;
 			this.anisotropyFactor = anisotropyFactor;
 			this.minBB = boundingBox.minAsLongArray();
@@ -763,7 +763,7 @@ public class AffineFusion implements Callable< Void >, Serializable
 
 			// custom serialization
 			out.println( "loading SpimData" );
-			final SpimData2 dataLocal = Spark.getSparkJobSpimData2("", xmlPath);
+			final SpimData2 dataLocal = Spark.getSparkJobSpimData2("", SparkFiles.get(xmlFileName));
 			final List< ViewId > viewIds = Spark.deserializeViewIds( serializedViewIds );
 
 			// If requested, preserve the anisotropy of the data (such that
