@@ -461,7 +461,13 @@ public class AffineFusion implements Callable< Void >, Serializable
 		if ( bdvString != null && xmlOutPath != null )
 		{
 			System.out.println( "Copy " + localXmlOutPath + " -> " + xmlOutPath );
-			FileSystem.get( sc.hadoopConfiguration() ).copyFromLocalFile( new Path( localXmlOutPath ), new Path( xmlOutPath ) );
+			try {
+				FileSystem.get(sc.hadoopConfiguration()).copyFromLocalFile(new Path(localXmlOutPath), new Path(xmlOutPath));
+			} catch (Exception e)
+			{
+				System.out.println("Cannot copy final xml from " + localXmlOutPath + " to " + xmlOutPath);
+				System.out.println(e.toString());
+			}
 		}
 
 		sc.close();
