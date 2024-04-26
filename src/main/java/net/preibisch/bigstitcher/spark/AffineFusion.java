@@ -485,7 +485,11 @@ public class AffineFusion implements Callable<Void>, Serializable
 					final RandomAccessibleInterval<FloatType> source = FusionTools.fuseVirtual(
 							dataLocal,
 							viewIdsLocal,
-							new FinalInterval(minBB, maxBB)
+							true,
+							false,
+							false,
+							1,
+							new FinalInterval(minBB, maxBB), null
 					);
 
 					final N5Writer executorVolumeWriter;
