@@ -37,6 +37,7 @@ import net.preibisch.mvrecon.process.export.ExportN5API.StorageType;
 import net.preibisch.mvrecon.process.export.ExportTools;
 import net.preibisch.mvrecon.process.export.ExportTools.InstantiateViewSetup;
 import net.preibisch.mvrecon.process.fusion.FusionTools;
+import net.preibisch.mvrecon.process.fusion.transformed.FusedRandomAccessibleInterval;
 import net.preibisch.mvrecon.process.interestpointregistration.TransformationTools;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -373,9 +374,9 @@ public class AffineFusion implements Callable<Void>, Serializable
 
 		final List<long[][]> grid = Grid.create(dimensions,
 				new int[] {
-						blockSize[0] * 4,
-						blockSize[1] * 4,
-						blockSize[2] * 4
+						blockSize[0] * 2,
+						blockSize[1] * 2,
+						blockSize[2] * 2
 				},
 				blockSize);
 
@@ -487,9 +488,8 @@ public class AffineFusion implements Callable<Void>, Serializable
 							viewIdsLocal,
 							true,
 							false,
-							false,
 							1,
-							new FinalInterval(minBB, maxBB), null
+							new FinalInterval(minBB, maxBB), null, FusedRandomAccessibleInterval.Fusion.FIRST_WINS
 					);
 
 					final N5Writer executorVolumeWriter;

@@ -3,7 +3,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <artifactId>BigStitcher-Spark</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.2-firstwin</version>
 
     <parent>
         <groupId>org.scijava</groupId>
@@ -221,7 +221,7 @@
         <dependency>
             <groupId>net.preibisch</groupId>
             <artifactId>multiview-reconstruction</artifactId>
-            <version>3.2.12-maxbuild</version>
+            <version>3.2.13-firstwin</version>
             <exclusions>
                 <exclusion>
                     <groupId>ch.epfl.biop</groupId>
